@@ -241,10 +241,8 @@ func (T *DefaultHandle) TCP(clientConn net.Conn, r *RequestTCP) error {
 		if buffsize == 0 {
 			buffsize = BuffSize
 		}
-		var bufa = make([]byte, buffsize)
-		go io.CopyBuffer(clientConn, rc, bufa)
-		var bufb = make([]byte, buffsize)
-		_, err = io.CopyBuffer(rc, clientConn, bufb)
+		go copyData(clientConn, rc, buffsize)
+		_, err = copyData(rc, clientConn, buffsize)
 		return err
 	}
 	if r.Cmd == CmdUDP {

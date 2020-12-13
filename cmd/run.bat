@@ -7,7 +7,7 @@ set GOARCH=amd64
 go build -o ../bin/vsocks5-win-amd64.exe  -gcflags "-N -l -m"
 
 cd /D ../bin/
-vsocks5-win-amd64.exe -addr :1081 -user admin -pwd 123 -proxy "https://127.0.0.1:803"
+vsocks5-win-amd64.exe -addr :1081
 
 pause
 exit 0

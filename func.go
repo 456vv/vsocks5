@@ -336,6 +336,10 @@ func delay(wait, maxDelay time.Duration) time.Duration {
 }
 
 
+func copyData(dst io.Writer, src io.ReadCloser, bufferSize int)(written int64, err error){
+    buf := make([]byte, bufferSize)
+    return io.CopyBuffer(dst, src, buf)
+}
 
 
 
