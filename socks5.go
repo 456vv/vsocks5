@@ -30,28 +30,12 @@ type NegotiationRequestAuth struct {
 	Passwd []byte // 1-255 bytes
 }
 func (r *NegotiationRequestAuth) WriteTo(w io.Writer) (int64, error) {
-	var n int
-	i, err := w.Write([]byte{r.Ver, r.Ulen})
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	i, err = w.Write(r.Uname)
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	i, err = w.Write([]byte{r.Plen})
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	i, err = w.Write(r.Passwd)
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	return int64(n), nil
+	b := []byte{r.Ver, r.Ulen}
+	b = append(b, r.Uname...)
+	b = append(b, r.Plen)
+	b = append(b, r.Passwd...)
+	n, err := w.Write(b)
+	return int64(n), err
 }
 type NegotiationReplyAuth struct {
 	Ver    byte
@@ -168,26 +152,11 @@ type ReplyTCP struct {
 	BndPort []byte // 2 bytes
 }
 func (r *ReplyTCP) WriteTo(w io.Writer) (int64, error) {
-	var n int
-	i, err := w.Write([]byte{r.Ver, r.Rep, r.Rsv, r.Atyp})
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	
-	i, err = w.Write(r.BndAddr)
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	
-	i, err = w.Write(r.BndPort)
-	n = n + i
-	if err != nil {
-		return int64(n), err
-	}
-	
-	return int64(n), nil
+	b := []byte{r.Ver, r.Rep, r.Rsv, r.Atyp}
+	b = append(b, r.BndAddr...)
+	b = append(b, r.BndPort...)
+	n, err := w.Write(b)
+	return int64(n), err
 }
 func (r *ReplyTCP) Address() string {
 	var s string
