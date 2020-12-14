@@ -14,6 +14,13 @@ type NegotiationRequest struct {
 	NMethods byte
 	Methods  []byte // 1-255 bytes
 }
+func (r *NegotiationRequest) WriteTo(w io.Writer) (int64, error) {
+	b := []byte{r.Ver, r.NMethods}
+	b = append(b, r.Methods...)
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
 type NegotiationReply struct {
 	Ver    byte
 	Method byte
@@ -22,6 +29,7 @@ func (r *NegotiationReply) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write([]byte{r.Ver, r.Method})
 	return int64(n), err
 }
+
 type NegotiationRequestAuth struct {
 	Ver    byte
 	Ulen   byte
@@ -106,13 +114,13 @@ func (r *RequestTCP) RemoteConnect(dial *Dialer, w io.Writer) (rc net.Conn, err 
 
 	return rc, nil
 }
-func (r *RequestTCP) UDP(clientTCPConn net.Conn, proxyAddr *net.UDPAddr) (desAddr *net.UDPAddr, err error) {
+func (r *RequestTCP) UDP(clientTCPConn net.Conn, proxyAddr *net.UDPAddr) (clientUDPAddr *net.UDPAddr, err error) {
 	if bytes.Compare(r.DstPort, []byte{0x00, 0x00}) == 0 {
 		// 如果请求的主机/端口都是零，那么中继应该只使用发送请求的主机/端口。
 		// https://stackoverflow.com/questions/62283351/how-to-use-socks-5-proxy-with-tidudpclient-properly
-		desAddr, err = net.ResolveUDPAddr("udp", clientTCPConn.RemoteAddr().String())
+		clientUDPAddr, err = net.ResolveUDPAddr("udp", clientTCPConn.RemoteAddr().String())
 	} else {
-		desAddr, err = net.ResolveUDPAddr("udp", r.Address())
+		clientUDPAddr, err = net.ResolveUDPAddr("udp", r.Address())
 	}
 	if err != nil {
 		if e := r.replyError(RepHostUnreachable, clientTCPConn); e != nil {
@@ -133,9 +141,15 @@ func (r *RequestTCP) UDP(clientTCPConn net.Conn, proxyAddr *net.UDPAddr) (desAdd
 	if _, err := p.WriteTo(clientTCPConn); err != nil {
 		return nil, err
 	}
-	return desAddr, nil
+	return clientUDPAddr, nil
 }
-
+func (r *RequestTCP) WriteTo(w io.Writer) (int64, error) {
+	b := []byte{r.Ver, r.Cmd, r.Rsv, r.Atyp}
+	b = append(b, r.DstAddr...)
+	b = append(b, r.DstPort...)
+	n, err := w.Write(b)
+	return int64(n), err
+}
 
 type ReplyTCP struct {
 	Ver  byte
