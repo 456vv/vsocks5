@@ -133,7 +133,7 @@ func main(){
 				
 				var pauth string
 				if puser != "" {
-					pauth = "\nProxy-Authorization: Basic " +basicAuth(puser, puser)
+					pauth = "\nProxy-Authorization: Basic " +basicAuth(puser, ppwd)
 				}
 				pconn.Write([]byte(fmt.Sprintf("CONNECT %[1]s HTTP/1.1\r\nHost: %[1]s%s\r\n\r\n", address, pauth)))
 				
