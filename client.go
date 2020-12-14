@@ -10,6 +10,7 @@ type Client struct {
 	Server   string
 	UserName string
 	Password string
+	DialTCP func(net string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error)
 	// On cmd UDP, let server control the tcp and udp connection relationship
 	tcpConn       *net.TCPConn
 	udpConn       *net.UDPConn
@@ -182,8 +183,11 @@ func (c *Client) negotiate(laddr *net.TCPAddr) error {
 	if err != nil {
 		return err
 	}
-	
-	c.tcpConn, err = net.DialTCP("tcp", laddr, raddr)
+	if c.DialTCP != nil {
+		c.tcpConn, err = c.DialTCP("tcp", laddr, raddr)
+	}else{
+		c.tcpConn, err = net.DialTCP("tcp", laddr, raddr)
+	}
 	if err != nil {
 		return err
 	}
