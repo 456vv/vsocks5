@@ -66,9 +66,13 @@ func main(){
             fmt.Println("代理地址格式错误：", err)
             return
 		}
-		puser := u.User.Username()
-		ppwd, _ := u.User.Password()
-		if u.Scheme == "ssh" {
+		var puser, ppwd string
+    	if u.User != nil {
+    		puser = u.User.Username()
+    		ppwd, _ = u.User.Password()
+    	}
+    	switch u.Scheme {
+    	case "ssh":
 			//ssh代理
 			config := &ssh.ClientConfig{
 				User: puser,
@@ -113,7 +117,17 @@ func main(){
 				
 				return client.Dial(network, address)
 			}
-		}else if u.Scheme == "http" || u.Scheme == "https" {
+		case "socks5":
+			//socks5代理
+			s5Client := &vsocks5.Client{
+				Username: puser,
+				Password: ppwd,
+				Server: u.Host,
+			}
+			handle.Dialer.Dial=func(network, address string) (net.Conn, error){
+				return s5Client.Dial(network, address)
+			}
+		case "https","http":
 			connPool := &vconnpool.ConnPool{
 				Dialer: &net.Dialer{
 					Timeout: 5 * time.Second,
@@ -138,7 +152,7 @@ func main(){
 				pconn.Write([]byte(fmt.Sprintf("CONNECT %[1]s HTTP/1.1\r\nHost: %[1]s%s\r\n\r\n", address, pauth)))
 				
 				resultStatus200 := []byte("HTTP/1.1 200 Connection established\r\n\r\n")
-				p := make([]byte, 39)
+				p := make([]byte, 1024)
 				n, err := pconn.Read(p)
 				if err != nil {
 					return nil, err
@@ -149,7 +163,10 @@ func main(){
 				}
 				return pconn, err
 			}
-		}
+    	default:
+			fmt.Printf("暂时不支持 %s 协议代理！\n", u.Scheme)
+			return
+    	}
 	}	
    	defer s5.Close()
     err := s5.ListenAndServe()
