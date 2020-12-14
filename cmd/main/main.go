@@ -100,14 +100,17 @@ func main(){
 				client.Close()
 			}()
 			handle.Dialer.Dial=func(network, address string) (net.Conn, error){
-				select {
-				case <-sshConn.(vconn.CloseNotifier).CloseNotify():
-					sshConn, client, err = sshDial("tcp", u.Host, config)
-					if err != nil {
-						return nil, err
+				if cn, ok := sshConn.(vconn.CloseNotifier); ok {
+					select {
+					case <-cn.CloseNotify():
+						sshConn, client, err = sshDial("tcp", u.Host, config)
+						if err != nil {
+							return nil, err
+						}
+					default:
 					}
-				default:
 				}
+				
 				return client.Dial(network, address)
 			}
 		}else if u.Scheme == "http" || u.Scheme == "https" {
