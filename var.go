@@ -13,6 +13,7 @@ var (
 	ErrUnsupportCmd = errors.New("Unsupport Command")
 	ErrUserPassAuth = errors.New("Invalid Username or Password for Auth")
 	ErrTCPConnClose = errors.New("TCP connection is closed")
+	ErrBadReply = errors.New("Bad Reply")
 )
 
 var (

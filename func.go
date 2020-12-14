@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"strconv"
 )
-
+//server
 func negotiateReadRequest(r io.Reader) (*NegotiationRequest, error) {
 	bb := make([]byte, 2)
 	if _, err := io.ReadFull(r, bb); err != nil {
@@ -36,7 +36,9 @@ func newNegotiateWriteReply(method byte) *NegotiationReply {
 		Method: method,
 	}
 }
-func negotiateWriteReply(r io.Reader) (*NegotiationReply, error) {
+
+//client
+func negotiateReadReply(r io.Reader) (*NegotiationReply, error) {
 	bb := make([]byte, 2)
 	if _, err := io.ReadFull(r, bb); err != nil {
 		return nil, err
@@ -49,7 +51,7 @@ func negotiateWriteReply(r io.Reader) (*NegotiationReply, error) {
 		Method: bb[1],
 	}, nil
 }
-func newNegotiateReadRequest(methods []byte) *NegotiationRequest {
+func newNegotiateWriteRequest(methods []byte) *NegotiationRequest {
 	return &NegotiationRequest{
 		Ver:      Ver,
 		NMethods: byte(len(methods)),
@@ -57,6 +59,7 @@ func newNegotiateReadRequest(methods []byte) *NegotiationRequest {
 	}
 }
 
+//client
 func newNegotiateAuthRequest(username []byte, password []byte) *NegotiationRequestAuth {
 	return &NegotiationRequestAuth{
 		Ver:    UserPassVer,
@@ -80,6 +83,7 @@ func negotiateAuthReply(r io.Reader) (*NegotiationReplyAuth, error) {
 	}, nil
 }
 
+//server
 func negotiateAuthRequest(r io.Reader) (*NegotiationRequestAuth, error) {
 	bb := make([]byte, 2)
 	if _, err := io.ReadFull(r, bb); err != nil {
@@ -117,7 +121,7 @@ func newNegotiateAuthReply(status byte) *NegotiationReplyAuth {
 	}
 }
 
-
+//server
 func readRequestTCP(r io.Reader) (*RequestTCP, error) {
 	bb := make([]byte, 4)
 	if _, err := io.ReadFull(r, bb); err != nil {
@@ -181,6 +185,73 @@ func newReplyTCP(rep byte, atyp byte, bndaddr []byte, bndport []byte) *ReplyTCP 
 		BndPort: bndport,
 	}
 }
+
+//client
+func newRequestTCP(cmd byte, atyp byte, dstaddr []byte, dstport []byte) *RequestTCP {
+	if atyp == ATYPDomain {
+		dstaddr = append([]byte{byte(len(dstaddr))}, dstaddr...)
+	}
+	return &RequestTCP{
+		Ver:     Ver,
+		Cmd:     cmd,
+		Rsv:     0x00,
+		Atyp:    atyp,
+		DstAddr: dstaddr,
+		DstPort: dstport,
+	}
+}
+func readReplyTCP(r io.Reader) (*ReplyTCP, error) {
+	bb := make([]byte, 4)
+	if _, err := io.ReadFull(r, bb); err != nil {
+		return nil, err
+	}
+	if bb[0] != Ver {
+		return nil, ErrVersion
+	}
+	var addr []byte
+	switch bb[3] {
+	case ATYPIPv4:
+		addr = make([]byte, 4)
+		if _, err := io.ReadFull(r, addr); err != nil {
+			return nil, err
+		}
+	case ATYPIPv6:
+		addr = make([]byte, 16)
+		if _, err := io.ReadFull(r, addr); err != nil {
+			return nil, err
+		}
+	case ATYPDomain:
+		dal := make([]byte, 1)
+		if _, err := io.ReadFull(r, dal); err != nil {
+			return nil, err
+		}
+		if dal[0] == 0 {
+			return nil, ErrBadReply
+		}
+		addr = make([]byte, int(dal[0]))
+		if _, err := io.ReadFull(r, addr); err != nil {
+			return nil, err
+		}
+		addr = append(dal, addr...)
+	default:
+		return nil, ErrBadReply
+	}
+	port := make([]byte, 2)
+	if _, err := io.ReadFull(r, port); err != nil {
+		return nil, err
+	}
+	return &ReplyTCP{
+		Ver:     bb[0],
+		Rep:     bb[1],
+		Rsv:     bb[2],
+		Atyp:    bb[3],
+		BndAddr: addr,
+		BndPort: port,
+	}, nil
+}
+
+
+//server/client
 func readRequestUDP(bb []byte) (*DatagramUDP, error) {
 	n := len(bb)
 	minl := 4
@@ -249,6 +320,9 @@ func newReplyUDP(atyp byte, dstaddr []byte, dstport []byte, data []byte) *Datagr
 		Data:    data,
 	}
 }
+
+
+
 func parseAddress(address string) (a byte, addr []byte, port []byte, err error) {
 	var h, p string
 	h, p, err = net.SplitHostPort(address)
@@ -340,21 +414,4 @@ func copyData(dst io.Writer, src io.ReadCloser, bufferSize int)(written int64, e
     buf := make([]byte, bufferSize)
     return io.CopyBuffer(dst, src, buf)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

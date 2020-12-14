@@ -248,24 +248,26 @@ func (T *DefaultHandle) TCP(clientConn net.Conn, r *RequestTCP) error {
 	if r.Cmd == CmdUDP {
 		var proxyAddr = new(net.UDPAddr)
 		if tcpAddr, ok := clientConn.LocalAddr().(*net.TCPAddr); ok {
-			copy(proxyAddr.IP, tcpAddr.IP)
+			proxyAddr.IP = tcpAddr.IP
 			proxyAddr.Port = tcpAddr.Port
+			proxyAddr.Zone = tcpAddr.Zone
 		}
-		dstAddr, err := r.UDP(clientConn, proxyAddr)
+		
+		clientUDPAddr, err := r.UDP(clientConn, proxyAddr)
 		if err != nil {
 			return err
 		}
 		
 		//记录目录地址，允许访问
-		if caddr, ok := clientConn.RemoteAddr().(*net.TCPAddr); ok {
-			allowFlag := caddr.IP.String() + dstAddr.String()
-			noticeClose := make(chan struct{})
-			T.associatedUDP.Set(allowFlag, noticeClose)
-			defer func (){
-				T.associatedUDP.Del(allowFlag)
-				close(noticeClose)
-			}()
-		}
+		allowFlag := clientUDPAddr.String()
+		noticeClose := make(chan struct{})
+		T.associatedUDP.Set(allowFlag, noticeClose)
+		defer func (){
+			T.associatedUDP.Del(allowFlag)
+			time.Sleep(time.Millisecond*50)
+			close(noticeClose)
+		}()
+		
 		io.Copy(ioutil.Discard, clientConn)
 		return nil
 	}
@@ -274,14 +276,13 @@ func (T *DefaultHandle) TCP(clientConn net.Conn, r *RequestTCP) error {
 
 func (T *DefaultHandle) UDP(proxyUDP *net.UDPConn, clientAddr *net.UDPAddr, d *DatagramUDP) error {
 	//允许访问
-	dst := d.Address()
-	allowFlag := clientAddr.IP.String() + dst
-	ch, ok := T.associatedUDP.GetHas(allowFlag)
+	src := clientAddr.String()
+	ch, ok := T.associatedUDP.GetHas(src)
 	if !ok {
-		return fmt.Errorf("This udp address %s is not associated with tcp", dst)
+		return fmt.Errorf("This udp address %s is not associated with tcp", src)
 	}
 	
-	src := clientAddr.String()
+	dst := d.Address()
 	var e *udpExchange
 	ie, ok := T.udpExchange.GetHas(src + dst)
 	if ok {
