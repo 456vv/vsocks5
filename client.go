@@ -8,8 +8,9 @@ import (
 
 type Client struct {
 	Server   string
-	UserName string
+	Username string
 	Password string
+	DialTCP func(net string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error)
 	// On cmd UDP, let server control the tcp and udp connection relationship
 	tcpConn       *net.TCPConn
 	udpConn       *net.UDPConn
@@ -182,14 +183,17 @@ func (c *Client) negotiate(laddr *net.TCPAddr) error {
 	if err != nil {
 		return err
 	}
-	
-	c.tcpConn, err = net.DialTCP("tcp", laddr, raddr)
+	if c.DialTCP != nil {
+		c.tcpConn, err = c.DialTCP("tcp", laddr, raddr)
+	}else{
+		c.tcpConn, err = net.DialTCP("tcp", laddr, raddr)
+	}
 	if err != nil {
 		return err
 	}
 	
 	m := MethodNone
-	if c.UserName != "" {
+	if c.Username != "" {
 		m = MethodUsernamePassword
 	}
 	rq := newNegotiateWriteRequest([]byte{m})
@@ -206,7 +210,7 @@ func (c *Client) negotiate(laddr *net.TCPAddr) error {
 	}
 	
 	if m == MethodUsernamePassword {
-		urq := newNegotiateAuthRequest([]byte(c.UserName), []byte(c.Password))
+		urq := newNegotiateAuthRequest([]byte(c.Username), []byte(c.Password))
 		if _, err := urq.WriteTo(c.tcpConn); err != nil {
 			return err
 		}
