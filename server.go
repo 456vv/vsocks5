@@ -243,6 +243,9 @@ func (T *DefaultHandle) TCP(clientConn net.Conn, r *RequestTCP) error {
 		}
 		go copyData(clientConn, rc, buffsize)
 		_, err = copyData(rc, clientConn, buffsize)
+		if err == io.EOF {
+			return nil
+		}
 		return err
 	}
 	if r.Cmd == CmdUDP {
