@@ -107,6 +107,7 @@ func main(){
 				if cn, ok := sshConn.(vconn.CloseNotifier); ok {
 					select {
 					case <-cn.CloseNotify():
+						sshConn.Close()
 						sshConn, client, err = sshDial("tcp", u.Host, config)
 						if err != nil {
 							return nil, err
