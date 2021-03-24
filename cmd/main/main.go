@@ -16,6 +16,7 @@ import (
     "bytes"
     "errors"
     "encoding/base64"
+    "sync"
 )
 
 var (
@@ -34,6 +35,8 @@ func main(){
         fmt.Println("\r\n命令行例子：vsocks5 -addr 0.0.0.0:1080")
         return
     }
+    log.SetFlags(log.Lshortfile|log.LstdFlags)
+    
     var out io.Writer = os.Stdout
     if *flog != "" {
         file, err := os.OpenFile(*flog, os.O_CREATE | os.O_RDWR, 0777)
@@ -87,35 +90,60 @@ func main(){
 					ssh.KeyAlgoRSA,
 					ssh.KeyAlgoDSA,
 					ssh.KeyAlgoECDSA256,
+					ssh.KeyAlgoSKECDSA256,
 					ssh.KeyAlgoECDSA384,
 					ssh.KeyAlgoECDSA521,
 					ssh.KeyAlgoED25519,
+					ssh.KeyAlgoSKED25519,
 				},
-				Timeout: 5 * time.Second,
+				Timeout: 10 * time.Second,
 			}
 			
-			sshConn, client, err := sshDial("tcp", u.Host, config)
+			var (
+			 	sshConnect bool
+			 	dialMux sync.Mutex
+			 	sshConn net.Conn
+			 	client *ssh.Client
+			 ) 
+			var sshReconn = func() error {
+				dialMux.Lock()
+				defer dialMux.Unlock()
+				if sshConnect {
+					return nil
+				}
+				
+				sshConn, client, err = sshDial("tcp", u.Host, config)
+				if err != nil {
+					return err
+				}
+				sshConnect=true
+				go func(){
+					if cn, ok := sshConn.(vconn.CloseNotifier); ok {
+						select{
+						case err := <-cn.CloseNotify():
+							log.Println(err)
+							client.Close()
+							sshConnect=false
+						}
+					}
+				}()
+				return nil
+			}
+			err = sshReconn()
 			if err != nil {
 				fmt.Println("代理拨号错误: ", err)
 	            return
 			}
-			
 			defer func(){
 				client.Close()
 			}()
 			handle.Dialer.Dial=func(network, address string) (net.Conn, error){
-				if cn, ok := sshConn.(vconn.CloseNotifier); ok {
-					select {
-					case <-cn.CloseNotify():
-						sshConn.Close()
-						sshConn, client, err = sshDial("tcp", u.Host, config)
-						if err != nil {
-							return nil, err
-						}
-					default:
+				if !sshConnect {
+					err := sshReconn()
+					if err != nil {
+						return nil, err
 					}
 				}
-				
 				return client.Dial(network, address)
 			}
 		case "socks5":
@@ -190,7 +218,6 @@ func sshDial(network, addr string, config *ssh.ClientConfig) (net.Conn, *ssh.Cli
 	
 	return conn, ssh.NewClient(c, chans, reqs), nil
 }
-
 func basicAuth(username, password string) string {
 	auth := username + ":" + password
 	return base64.StdEncoding.EncodeToString([]byte(auth))
