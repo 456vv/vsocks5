@@ -1,37 +1,38 @@
 package vsocks5
 
 import (
-	"net"
-	"time"
-	"log"
-	"github.com/456vv/vmap/v2"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"context"
+	"log"
+	"net"
+	"time"
+
+	"github.com/456vv/vmap/v2"
 )
-	
+
 const (
 	socks5Version = uint8(5)
 )
 
-
-type Server struct{
-	Auth		func(username, password string) bool
-	Supported	Cmd
-	Addr     	string
-	listenTCP	*net.TCPListener
-	listenUDP	*net.UDPConn
-	Handle		Handler
-	ErrorLog    *log.Logger                                                                 // 日志
-	Method		byte
+type Server struct {
+	Auth      func(username, password string) bool
+	Supported Cmd
+	Addr      string
+	listenTCP *net.TCPListener
+	listenUDP *net.UDPConn
+	Handle    Handler
+	ErrorLog  *log.Logger // 日志
+	Method    byte
 }
 
 func (T *Server) ListenAndServe() error {
 	go T.ServerUDP()
 	return T.ServerTCP()
 }
-func (T *Server) Close() error{
+
+func (T *Server) Close() error {
 	if T.listenTCP != nil {
 		T.listenTCP.Close()
 	}
@@ -40,6 +41,7 @@ func (T *Server) Close() error{
 	}
 	return nil
 }
+
 func (T *Server) ServerTCP() error {
 	if T.Addr == "" {
 		return ErrEmptyAddr
@@ -47,23 +49,23 @@ func (T *Server) ServerTCP() error {
 	if T.Handle == nil {
 		return ErrHandler
 	}
-	
+
 	var err error
 	taddr, err := net.ResolveTCPAddr("tcp", T.Addr)
 	if err != nil {
 		return err
 	}
-	
+
 	T.listenTCP, err = net.ListenTCP("tcp", taddr)
 	if err != nil {
 		return err
 	}
 	defer T.listenTCP.Close()
-	
-   	var (
-   		tempDelay time.Duration
-   		ok bool
-   	)
+
+	var (
+		tempDelay time.Duration
+		ok        bool
+	)
 	for {
 		conn, err := T.listenTCP.AcceptTCP()
 		if err != nil {
@@ -72,13 +74,14 @@ func (T *Server) ServerTCP() error {
 			}
 			return err
 		}
-        tempDelay = 0
+		tempDelay = 0
 		go T.serveConnTCP(conn)
 	}
 }
+
 func (T *Server) serveConnTCP(conn net.Conn) error {
 	defer conn.Close()
-	
+
 	if err := T.negotiate(conn); err != nil {
 		T.logf(err.Error())
 		return err
@@ -94,8 +97,9 @@ func (T *Server) serveConnTCP(conn net.Conn) error {
 	}
 	return nil
 }
+
 func (T *Server) negotiate(rw io.ReadWriter) error {
-	rq, err := negotiateReadRequest(rw)
+	rq, err := ReadNegotiateMethodRequest(rw)
 	if err != nil {
 		return err
 	}
@@ -105,39 +109,40 @@ func (T *Server) negotiate(rw io.ReadWriter) error {
 			got = true
 		}
 	}
-	
+
 	if !got {
-		rp := newNegotiateWriteReply(MethodUnsupportAll)
+		rp := NewNegotiateMethodReply(MethodUnsupportAll)
 		if _, err := rp.WriteTo(rw); err != nil {
 			return err
 		}
 	}
-	rp := newNegotiateWriteReply(T.Method)
+	rp := NewNegotiateMethodReply(T.Method)
 	if _, err := rp.WriteTo(rw); err != nil {
 		return err
 	}
 
 	if T.Method == MethodUsernamePassword {
-		urq, err := negotiateAuthRequest(rw)
+		urq, err := ReadNegotiateAuthRequest(rw)
 		if err != nil {
 			return err
 		}
-		if T.Auth != nil && !T.Auth(string(urq.Uname), string(urq.Passwd)){
-			urp := newNegotiateAuthReply(UserPassStatusFailure)
+		if T.Auth != nil && !T.Auth(string(urq.Uname), string(urq.Passwd)) {
+			urp := NewNegotiateAuthReply(UserPassStatusFailure)
 			if _, err := urp.WriteTo(rw); err != nil {
 				return err
 			}
 			return ErrUserPassAuth
 		}
-		urp := newNegotiateAuthReply(UserPassStatusSuccess)
+		urp := NewNegotiateAuthReply(UserPassStatusSuccess)
 		if _, err := urp.WriteTo(rw); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
 func (T *Server) readRequest(rw io.ReadWriter) (*RequestTCP, error) {
-	r, err := readRequestTCP(rw)
+	r, err := ReadRequestTCP(rw)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +154,7 @@ func (T *Server) readRequest(rw io.ReadWriter) (*RequestTCP, error) {
 		}
 	}
 	if !supported {
-		if e := r.replyError(RepCommandNotSupported, rw); e != nil {
+		if e := r.ReplyError(RepCommandNotSupported, rw); e != nil {
 			return nil, e
 		}
 		return nil, ErrUnsupportCmd
@@ -164,20 +169,20 @@ func (T *Server) ServerUDP() error {
 	if T.Handle == nil {
 		return ErrHandler
 	}
-	
+
 	var err error
 	uaddr, err := net.ResolveUDPAddr("udp", T.Addr)
 	if err != nil {
 		return err
 	}
-	
+
 	T.listenUDP, err = net.ListenUDP("udp", uaddr)
 	if err != nil {
 		return err
 	}
-	
+
 	defer T.listenUDP.Close()
-	
+
 	b := make([]byte, 65507)
 	for {
 		n, addr, err := T.listenUDP.ReadFromUDP(b)
@@ -187,8 +192,9 @@ func (T *Server) ServerUDP() error {
 		go T.serveConnUDP(addr, b[0:n])
 	}
 }
-func (T *Server) serveConnUDP(clientAddr *net.UDPAddr, b []byte) error {
-	d, err := readRequestUDP(b)
+
+func (T *Server) serveConnUDP(cAddr *net.UDPAddr, b []byte) error {
+	d, err := ReadRequestUDP(b)
 	if err != nil {
 		T.logf(err.Error())
 		return err
@@ -197,7 +203,7 @@ func (T *Server) serveConnUDP(clientAddr *net.UDPAddr, b []byte) error {
 		T.logf("Ignore frag: %d", d.Frag)
 		return err
 	}
-	if err := T.Handle.UDP(T.listenUDP, clientAddr, d); err != nil {
+	if err := T.Handle.UDP(T.listenUDP, cAddr, d); err != nil {
 		T.logf(err.Error())
 		return err
 	}
@@ -206,16 +212,15 @@ func (T *Server) serveConnUDP(clientAddr *net.UDPAddr, b []byte) error {
 
 func (T *Server) logf(format string, v ...interface{}) error {
 	err := fmt.Errorf(format+"\n", v...)
-    if T.ErrorLog != nil {
-        T.ErrorLog.Output(2, err.Error())
-    }
-    return err
+	if T.ErrorLog != nil {
+		T.ErrorLog.Output(2, err.Error())
+	}
+	return err
 }
 
-
-type Dialer struct{
-	Dial		func(network, address string) (net.Conn, error)
-	DialContext	func(ctx context.Context, network, address string) (net.Conn, error)
+type Dialer struct {
+	Dial        func(network, address string) (net.Conn, error)
+	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
 }
 type Handler interface {
 	TCP(net.Conn, *RequestTCP) error
@@ -224,67 +229,74 @@ type Handler interface {
 
 type DefaultHandle struct {
 	Dialer
-	BuffSize		int
-	associatedUDP	vmap.Map
-	udpExchange		vmap.Map
+	BuffSize      int
+	associatedUDP vmap.Map
+	udpExchange   vmap.Map
 }
 
-func (T *DefaultHandle) TCP(clientConn net.Conn, r *RequestTCP) error {
+func (T *DefaultHandle) TCP(cconn net.Conn, r *RequestTCP) error {
 	if r.Cmd == CmdConnect {
-		rc, err := r.RemoteConnect(&T.Dialer, clientConn)
+		rc, err := r.RemoteConnect(&T.Dialer, cconn)
 		if err != nil {
 			return err
 		}
 		defer rc.Close()
-		
-		var buffsize = T.BuffSize
+
+		buffsize := T.BuffSize
 		if buffsize == 0 {
 			buffsize = BuffSize
 		}
-		go copyData(clientConn, rc, buffsize)
-		_, err = copyData(rc, clientConn, buffsize)
+		go copyData(cconn, rc, buffsize)
+		_, err = copyData(rc, cconn, buffsize)
 		if err == io.EOF {
 			return nil
 		}
 		return err
 	}
 	if r.Cmd == CmdUDP {
-		var proxyAddr = new(net.UDPAddr)
-		if tcpAddr, ok := clientConn.LocalAddr().(*net.TCPAddr); ok {
+		// cconn.LocalAddr 就是代理服务开启监听的TCP/UDP地址
+		proxyAddr := new(net.UDPAddr)
+		if tcpAddr, ok := cconn.LocalAddr().(*net.TCPAddr); ok {
 			proxyAddr.IP = tcpAddr.IP
 			proxyAddr.Port = tcpAddr.Port
 			proxyAddr.Zone = tcpAddr.Zone
 		}
-		
-		clientUDPAddr, err := r.UDP(clientConn, proxyAddr)
+
+		// clientUDPAddr 客户端会使用此地址发起UDP请求
+		clientUDPAddr, err := r.UDP(cconn, proxyAddr)
 		if err != nil {
 			return err
 		}
-		
-		//记录目录地址，允许访问
+
 		allowFlag := clientUDPAddr.String()
+		// 防止多条连接发送同样请求
+		if T.associatedUDP.Has(allowFlag) {
+			cconn.Close()
+			return nil
+		}
+
+		// 记录地址，允许访问
 		noticeClose := make(chan struct{})
 		T.associatedUDP.Set(allowFlag, noticeClose)
-		defer func (){
+		defer func() {
 			T.associatedUDP.Del(allowFlag)
-			time.Sleep(time.Millisecond*50)
+			time.Sleep(time.Millisecond * 50)
 			close(noticeClose)
 		}()
-		
-		io.Copy(ioutil.Discard, clientConn)
+		io.Copy(ioutil.Discard, cconn)
 		return nil
 	}
 	return ErrUnsupportCmd
 }
 
-func (T *DefaultHandle) UDP(proxyUDP *net.UDPConn, clientAddr *net.UDPAddr, d *DatagramUDP) error {
-	//允许访问
-	src := clientAddr.String()
+func (T *DefaultHandle) UDP(proxyUDP *net.UDPConn, cAddr *net.UDPAddr, d *DatagramUDP) error {
+	// 允许访问
+	src := cAddr.String()
 	ch, ok := T.associatedUDP.GetHas(src)
 	if !ok {
-		return fmt.Errorf("This udp address %s is not associated with tcp", src)
+		return fmt.Errorf("this udp address %s is not associated with tcp", src)
 	}
-	
+
 	dst := d.Address()
 	var e *udpExchange
 	ie, ok := T.udpExchange.GetHas(src + dst)
@@ -303,28 +315,29 @@ func (T *DefaultHandle) UDP(proxyUDP *net.UDPConn, clientAddr *net.UDPAddr, d *D
 		return err
 	}
 
-	rc, err := net.DialUDP("udp", laddr, raddr)
+	rconn, err := net.DialUDP("udp", laddr, raddr)
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
-	
+	defer rconn.Close()
+
 	e = &udpExchange{
 		noticeClose: ch.(chan struct{}),
-		serverConn: proxyUDP,
-		clientAddr: clientAddr,
-		remoteConn: rc,
+		serverConn:  proxyUDP,
+		clientAddr:  cAddr,
+		remoteConn:  rconn,
 	}
-	T.udpExchange.Set(src + dst, e)
+	T.udpExchange.Set(src+dst, e)
 	defer T.udpExchange.Del(src + dst)
-	
+
 	if err := T.sendUDP(e, d.Data); err != nil {
-		rc.Close()
+		rconn.Close()
 		return err
 	}
-	
+
 	return T.readUDP(e, dst)
 }
+
 func (T *DefaultHandle) sendUDP(e *udpExchange, data []byte) error {
 	select {
 	case <-e.noticeClose:
@@ -337,10 +350,11 @@ func (T *DefaultHandle) sendUDP(e *udpExchange, data []byte) error {
 	}
 	return nil
 }
+
 func (T *DefaultHandle) readUDP(e *udpExchange, dst string) error {
 	var b [65507]byte
-	for{
-		select{
+	for {
+		select {
 		case <-e.noticeClose:
 			return ErrTCPConnClose
 		default:
@@ -348,13 +362,13 @@ func (T *DefaultHandle) readUDP(e *udpExchange, dst string) error {
 			if err != nil {
 				return err
 			}
-			
-			a, addr, port, err := parseAddress(dst)
+
+			a, addr, port, err := ParseAddress(dst)
 			if err != nil {
 				return err
 			}
-			
-			d1 := newReplyUDP(a, addr, port, b[:n])
+
+			d1 := NewRequestUDP(a, addr, port, b[:n])
 			if _, err := e.serverConn.WriteToUDP(d1.Bytes(), e.clientAddr); err != nil {
 				return err
 			}
@@ -363,8 +377,8 @@ func (T *DefaultHandle) readUDP(e *udpExchange, dst string) error {
 }
 
 type udpExchange struct {
-	noticeClose	chan struct{}
-	serverConn	*net.UDPConn
-	clientAddr	*net.UDPAddr
-	remoteConn	*net.UDPConn
+	noticeClose chan struct{}
+	serverConn  *net.UDPConn
+	clientAddr  *net.UDPAddr
+	remoteConn  *net.UDPConn
 }

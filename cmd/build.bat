@@ -7,6 +7,7 @@ go mod tidy
 set GOOS=windows
 set GOARCH=amd64
 go build -o ../bin/vsocks5-win-amd64.exe -ldflags="-s -w"
+go clean -cache
 
 set GOOS=linux
 set GOARCH=amd64
@@ -20,5 +21,6 @@ set GOARCH=arm64
 go build -o ../bin/vsocks5-linux-arm64 -ldflags="-s -w"
 set GOARCH=mips
 go build -o ../bin/vsocks5-linux-mips -ldflags="-s -w"
+go clean -cache
 
 upx -9 ../bin/*

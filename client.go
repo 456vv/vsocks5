@@ -6,108 +6,18 @@ import (
 	"time"
 )
 
-type Client struct {
-	Server   string
-	Username string
-	Password string
-	DialTCP func(net string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error)
-	// On cmd UDP, let server control the tcp and udp connection relationship
-	tcpConn       *net.TCPConn
-	udpConn       *net.UDPConn
-	remoteAddress net.Addr			//udp used
+type clientConn struct {
+	sconn         net.Conn
+	conn          net.Conn
+	istcp         bool
+	remoteAddress net.Addr // udp used
 }
 
-func (c *Client) Dial(network, addr string) (net.Conn, error) {
-	return c.DialWithLocalAddr(network, "", addr)
-}
-
-func (c Client) DialWithLocalAddr(network, src, dst string) (net.Conn, error) {
-	
-	var err error
-	
-	var la *net.TCPAddr
-	if src != "" {
-		la, err = net.ResolveTCPAddr("tcp", src)
-		if err != nil {
-			return nil, err
-		}
+func (c *clientConn) Read(b []byte) (n int, err error) {
+	if n, err = c.conn.Read(b); err != nil || c.istcp {
+		return
 	}
-	
-	if err := c.negotiate(la); err != nil {
-		return nil, err
-	}
-	
-	if network == "tcp" {
-		
-		if c.remoteAddress == nil {
-			c.remoteAddress, err = net.ResolveTCPAddr("tcp", dst)
-			if err != nil {
-				return nil, err
-			}
-		}
-		
-		a, h, p, err := parseAddress(dst)
-		if err != nil {
-			return nil, err
-		}
-		
-		r := newRequestTCP(CmdConnect, a, h, p)
-		if _, err := c.request(r); err != nil {
-			return nil, err
-		}
-		
-		return &c, nil
-	}else if network == "udp" {
-		
-		if c.remoteAddress == nil {
-			c.remoteAddress, err = net.ResolveUDPAddr("udp", dst)
-			if err != nil {
-				return nil, err
-			}
-		}
-		
-		laddr := &net.UDPAddr{
-			IP:   c.tcpConn.LocalAddr().(*net.TCPAddr).IP,
-			Port: c.tcpConn.LocalAddr().(*net.TCPAddr).Port,
-			Zone: c.tcpConn.LocalAddr().(*net.TCPAddr).Zone,
-		}
-		
-		a, h, p, err := parseAddress(laddr.String())
-		if err != nil {
-			return nil, err
-		}
-		
-		//告诉服务器，我发起的UDP本地地址
-		r := newRequestTCP(CmdUDP, a, h, p)
-		rp, err := c.request(r)
-		if err != nil {
-			return nil, err
-		}
-		
-		//服务给的端口地址
-		raddr, err := net.ResolveUDPAddr("udp", rp.Address())
-		if err != nil {
-			return nil, err
-		}
-		
-		c.udpConn, err = net.DialUDP("udp", laddr, raddr)
-		if err != nil {
-			return nil, err
-		}
-		return &c, nil
-	}
-	return nil, errors.New("unsupport network")
-}
-
-func (c *Client) Read(b []byte) (int, error) {
-	if c.udpConn == nil {
-		return c.tcpConn.Read(b)
-	}
-	n, err := c.udpConn.Read(b)
-	if err != nil {
-		return 0, err
-	}
-	d, err := readRequestUDP(b[0:n])
+	d, err := ReadRequestUDP(b[0:n])
 	if err != nil {
 		return 0, err
 	}
@@ -115,19 +25,19 @@ func (c *Client) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-func (c *Client) Write(b []byte) (int, error) {
-	if c.udpConn == nil {
-		return c.tcpConn.Write(b)
+func (c *clientConn) Write(b []byte) (n int, err error) {
+	if c.istcp {
+		return c.conn.Write(b)
 	}
-	a, h, p, err := parseAddress(c.remoteAddress.String())
+
+	a, h, p, err := ParseAddress(c.remoteAddress.String())
 	if err != nil {
 		return 0, err
 	}
-	
-	d := newReplyUDP(a, h, p, b)
+
+	d := NewRequestUDP(a, h, p, b)
 	b1 := d.Bytes()
-	n, err := c.udpConn.Write(b1)
-	if err != nil {
+	if n, err = c.conn.Write(b1); err != nil {
 		return 0, err
 	}
 	if len(b1) != n {
@@ -136,107 +46,186 @@ func (c *Client) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (c *Client) Close() error {
-	if c.udpConn == nil {
-		return c.tcpConn.Close()
+func (c *clientConn) Close() error {
+	if !c.istcp {
+		// 使用udp代理后，需要关闭原有的tcp连接
+		c.sconn.Close()
 	}
-	if c.tcpConn != nil {
-		c.tcpConn.Close()
-	}
-	return c.udpConn.Close()
+	return c.conn.Close()
 }
 
-func (c *Client) LocalAddr() net.Addr {
-	if c.udpConn == nil {
-		return c.tcpConn.LocalAddr()
-	}
-	return c.udpConn.LocalAddr()
+func (c *clientConn) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
 }
 
-func (c *Client) RemoteAddr() net.Addr {
+func (c *clientConn) RemoteAddr() net.Addr {
 	return c.remoteAddress
 }
 
-func (c *Client) SetDeadline(t time.Time) error {
-	if c.udpConn == nil {
-		return c.tcpConn.SetDeadline(t)
-	}
-	return c.udpConn.SetDeadline(t)
+func (c *clientConn) SetDeadline(t time.Time) error {
+	return c.conn.SetDeadline(t)
 }
 
-func (c *Client) SetReadDeadline(t time.Time) error {
-	if c.udpConn == nil {
-		return c.tcpConn.SetReadDeadline(t)
-	}
-	return c.udpConn.SetReadDeadline(t)
+func (c *clientConn) SetReadDeadline(t time.Time) error {
+	return c.conn.SetReadDeadline(t)
 }
 
-func (c *Client) SetWriteDeadline(t time.Time) error {
-	if c.udpConn == nil {
-		return c.tcpConn.SetWriteDeadline(t)
-	}
-	return c.udpConn.SetWriteDeadline(t)
+func (c *clientConn) SetWriteDeadline(t time.Time) error {
+	return c.conn.SetWriteDeadline(t)
 }
 
-func (c *Client) negotiate(laddr *net.TCPAddr) error {
+type Client struct {
+	Server   string
+	Username string
+	Password string
+	DialTCP  func(network string, laddr, raddr *net.TCPAddr) (net.Conn, error)
+}
+
+func (c *Client) dial(laddr *net.TCPAddr) (conn net.Conn, err error) {
 	raddr, err := net.ResolveTCPAddr("tcp", c.Server)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if c.DialTCP != nil {
-		c.tcpConn, err = c.DialTCP("tcp", laddr, raddr)
-	}else{
-		c.tcpConn, err = net.DialTCP("tcp", laddr, raddr)
+		return c.DialTCP("tcp", laddr, raddr)
 	}
+	return net.DialTCP("tcp", laddr, raddr)
+}
+
+func (c *Client) Dial(network, addr string) (net.Conn, error) {
+	return c.DialWithLocalAddr(network, "", addr)
+}
+
+func (c Client) DialWithLocalAddr(network, src, dst string) (net.Conn, error) {
+	var err error
+
+	var la *net.TCPAddr
+	if src != "" {
+		la, err = net.ResolveTCPAddr("tcp", src)
+		if err != nil {
+			return nil, err
+		}
+	}
+	conn, err := c.dial(la)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	
+
+	nt, ok := conn.(*Negotiate)
+	if !ok || !nt.done {
+		if err = negotiate(conn, c.Username, c.Password); err != nil {
+			return nil, err
+		}
+	}
+	raddr, err := net.ResolveTCPAddr("tcp", dst)
+	if err != nil {
+		return nil, err
+	}
+	switch network {
+	case "tcp":
+		c.requestTCP(conn, dst)
+		return &clientConn{conn: conn, istcp: true, remoteAddress: raddr}, nil
+	case "udp":
+		udpConn, err := c.requestUDP(conn, dst)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		return &clientConn{sconn: conn, conn: udpConn, remoteAddress: raddr}, nil
+	}
+	return nil, errors.New("unsupport network")
+}
+
+func (c *Client) requestTCP(conn net.Conn, dst string) (*ReplyTCP, error) {
+	a, h, p, err := ParseAddress(dst)
+	if err != nil {
+		return nil, err
+	}
+
+	r := NewRequestTCP(CmdConnect, a, h, p)
+	return c.request(conn, r)
+}
+
+func (c *Client) requestUDP(conn net.Conn, dst string) (net.Conn, error) {
+	// 告诉代理服务器，我使用这个地址端口向代理服务器发起UDP请求
+	laddr := &net.UDPAddr{
+		IP:   conn.LocalAddr().(*net.TCPAddr).IP,
+		Port: conn.LocalAddr().(*net.TCPAddr).Port,
+		Zone: conn.LocalAddr().(*net.TCPAddr).Zone,
+	}
+	a, h, p, err := ParseAddress(laddr.String())
+	if err != nil {
+		return nil, err
+	}
+	r := NewRequestTCP(CmdUDP, a, h, p)
+	rp, err := c.request(conn, r)
+	if err != nil {
+		return nil, err
+	}
+
+	// 服务给监听的端口地址
+	raddr, err := net.ResolveUDPAddr("udp", rp.Address())
+	if err != nil {
+		return nil, err
+	}
+	return net.DialUDP("udp", laddr, raddr)
+}
+
+func (c *Client) request(conn net.Conn, r *RequestTCP) (*ReplyTCP, error) {
+	if _, err := r.WriteTo(conn); err != nil {
+		return nil, err
+	}
+	rp, err := ReadReplyTCP(conn)
+	if err != nil {
+		return nil, err
+	}
+	if rp.Rep != RepSuccess {
+		return nil, errors.New("host unreachable")
+	}
+	return rp, nil
+}
+
+type Negotiate struct {
+	net.Conn
+	done bool
+}
+
+// 验证账号
+func (T *Negotiate) Auth(username, password string) error {
+	T.done = true
+	return negotiate(T, username, password)
+}
+
+func negotiate(conn net.Conn, username, passwod string) error {
 	m := MethodNone
-	if c.Username != "" {
+	if username != "" {
 		m = MethodUsernamePassword
 	}
-	rq := newNegotiateWriteRequest([]byte{m})
-	if _, err := rq.WriteTo(c.tcpConn); err != nil {
+	rq := NewNegotiateMethodRequest([]byte{m})
+	if _, err := rq.WriteTo(conn); err != nil {
 		return err
 	}
-	
-	rp, err := negotiateReadReply(c.tcpConn)
+	rp, err := ReadNegotiateMethodReply(conn)
 	if err != nil {
 		return err
 	}
 	if rp.Method != m {
-		return errors.New("Unsupport method")
+		return errors.New("unsupport method")
 	}
-	
 	if m == MethodUsernamePassword {
-		urq := newNegotiateAuthRequest([]byte(c.Username), []byte(c.Password))
-		if _, err := urq.WriteTo(c.tcpConn); err != nil {
+		urq := NewNegotiateAuthRequest([]byte(username), []byte(passwod))
+		if _, err := urq.WriteTo(conn); err != nil {
 			return err
 		}
-		
-		urp, err := negotiateAuthReply(c.tcpConn)
+
+		urp, err := ReadNegotiateAuthReply(conn)
 		if err != nil {
 			return err
 		}
-		
+
 		if urp.Status != UserPassStatusSuccess {
 			return ErrUserPassAuth
 		}
 	}
 	return nil
-}
-
-func (c *Client) request(r *RequestTCP) (*ReplyTCP, error) {
-	if _, err := r.WriteTo(c.tcpConn); err != nil {
-		return nil, err
-	}
-	rp, err := readReplyTCP(c.tcpConn)
-	if err != nil {
-		return nil, err
-	}
-	if rp.Rep != RepSuccess {
-		return nil, errors.New("Host unreachable")
-	}
-	return rp, nil
 }

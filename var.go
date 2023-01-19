@@ -3,76 +3,77 @@ package vsocks5
 import (
 	"errors"
 )
-	
-var (
-	ErrVersion = errors.New("Invalid Version")
-	ErrUserPassVersion = errors.New("Invalid Version of Username Password Auth")
-	ErrBadRequest = errors.New("Bad Request")
-	ErrEmptyAddr = errors.New("Invalid Addr")
-	ErrHandler = errors.New("Data handler is not set")
-	ErrUnsupportCmd = errors.New("Unsupport Command")
-	ErrUserPassAuth = errors.New("Invalid Username or Password for Auth")
-	ErrTCPConnClose = errors.New("TCP connection is closed")
-	ErrBadReply = errors.New("Bad Reply")
-)
 
 var (
-	BuffSize = 32<<10	//32k
+	ErrVersion         = errors.New("invalid Version")
+	ErrUserPassVersion = errors.New("invalid Version of Username Password Auth")
+	ErrBadRequest      = errors.New("bad Request")
+	ErrEmptyAddr       = errors.New("invalid Addr")
+	ErrHandler         = errors.New("data handler is not set")
+	ErrUnsupportCmd    = errors.New("unsupport Command")
+	ErrUserPassAuth    = errors.New("invalid Username or Password for Auth")
+	ErrTCPConnClose    = errors.New("TCP connection is closed")
+	ErrBadReply        = errors.New("bad Reply")
 )
+
+var BuffSize = 32 << 10 // 32k
 
 type Cmd []byte
+
 const (
-	// CmdConnect is connect command
+	// CmdConnect 是 TCP 命令
 	CmdConnect byte = 0x01
-	// CmdBind is bind command
+	// CmdBind 是绑定端口命令
 	CmdBind byte = 0x02
-	// CmdUDP is UDP command
+	// CmdUDP 是 UDP 命令
 	CmdUDP byte = 0x03
 )
+
 const (
-	// MethodNone is none method
+	// MethodNone 是默认方法
 	MethodNone byte = 0x00
-	// MethodGSSAPI is gssapi method
+	// MethodGSSAPI 是gssapi方法
 	MethodGSSAPI byte = 0x01 // MUST support // todo
-	// MethodUsernamePassword is username/assword auth method
+	// MethodUsernamePassword 是用户名/密码授权方法
 	MethodUsernamePassword byte = 0x02 // SHOULD support
-	// MethodUnsupportAll means unsupport all given methods
+	// MethodUnsupportAll 表示不支持所有给定的方法
 	MethodUnsupportAll byte = 0xFF
 )
+
 const (
-	// Ver is socks protocol version
+	// ver是socks协议版本
 	Ver byte = 0x05
 
-	// UserPassVer is username/password auth protocol version
+	// UserPassVer 是用户名/密码授权协议版本
 	UserPassVer byte = 0x01
-	// UserPassStatusSuccess is success status of username/password auth
+	// UserPassStatusSuccess 是用户名/密码授权的成功状态
 	UserPassStatusSuccess byte = 0x00
-	// UserPassStatusFailure is failure status of username/password auth
+	// UserPassStatusFailure 是用户名/密码授权的失败状态
 	UserPassStatusFailure byte = 0x01 // just other than 0x00
 
-	// ATYPIPv4 is ipv4 address type
+	// ATYPIPv4 是ipv4地址类型
 	ATYPIPv4 byte = 0x01 // 4 octets
-	// ATYPDomain is domain address type
+	// ATYPDomain 是域名地址类型
 	ATYPDomain byte = 0x03 // The first octet of the address field contains the number of octets of name that follow, there is no terminating NUL octet.
-	// ATYPIPv6 is ipv6 address type
+	// ATYPIPv6 is ipv6 地址类型
 	ATYPIPv6 byte = 0x04 // 16 octets
 
-	// RepSuccess means that success for repling
+	// RepSuccess 意味着回复成功
 	RepSuccess byte = 0x00
-	// RepServerFailure means the server failure
+	// RepServerFailure 意味着服务器故障
 	RepServerFailure byte = 0x01
-	// RepNotAllowed means the request not allowed
+	// RepNotAllowed 表示请求不允许
 	RepNotAllowed byte = 0x02
-	// RepNetworkUnreachable means the network unreachable
+	// RepNetworkUnreachable 表示网络不可达
 	RepNetworkUnreachable byte = 0x03
-	// RepHostUnreachable means the host unreachable
+	// RepHostUnreachable 表示主机无法访问
 	RepHostUnreachable byte = 0x04
-	// RepConnectionRefused means the connection refused
+	// RepConnectionRefused 表示连接被拒绝
 	RepConnectionRefused byte = 0x05
-	// RepTTLExpired means the TTL expired
+	// RepTTLExpired 表示 TTL 已过期
 	RepTTLExpired byte = 0x06
-	// RepCommandNotSupported means the request command not supported
+	// RepCommandNotSupported 表示不支持请求命令
 	RepCommandNotSupported byte = 0x07
-	// RepAddressNotSupported means the request address not supported
+	// RepAddressNotSupported 表示不支持请求地址
 	RepAddressNotSupported byte = 0x08
 )

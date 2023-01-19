@@ -1,12 +1,12 @@
 package vsocks5
 
 import (
-	"io"
-	"encoding/binary"
 	"bytes"
+	"context"
+	"encoding/binary"
+	"io"
 	"net"
 	"strconv"
-	"context"
 )
 
 type NegotiationRequest struct {
@@ -14,6 +14,7 @@ type NegotiationRequest struct {
 	NMethods byte
 	Methods  []byte // 1-255 bytes
 }
+
 func (r *NegotiationRequest) WriteTo(w io.Writer) (int64, error) {
 	b := []byte{r.Ver, r.NMethods}
 	b = append(b, r.Methods...)
@@ -25,6 +26,7 @@ type NegotiationReply struct {
 	Ver    byte
 	Method byte
 }
+
 func (r *NegotiationReply) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write([]byte{r.Ver, r.Method})
 	return int64(n), err
@@ -37,6 +39,7 @@ type NegotiationRequestAuth struct {
 	Plen   byte
 	Passwd []byte // 1-255 bytes
 }
+
 func (r *NegotiationRequestAuth) WriteTo(w io.Writer) (int64, error) {
 	b := []byte{r.Ver, r.Ulen}
 	b = append(b, r.Uname...)
@@ -45,10 +48,12 @@ func (r *NegotiationRequestAuth) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write(b)
 	return int64(n), err
 }
+
 type NegotiationReplyAuth struct {
 	Ver    byte
 	Status byte
 }
+
 func (r *NegotiationReplyAuth) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write([]byte{r.Ver, r.Status})
 	return int64(n), err
@@ -62,18 +67,20 @@ type RequestTCP struct {
 	DstAddr []byte
 	DstPort []byte // 2 bytes
 }
-func (r *RequestTCP) replyError(rep byte, w io.Writer) error {
+
+func (r *RequestTCP) ReplyError(rep byte, w io.Writer) error {
 	var p *ReplyTCP
 	if r.Atyp == ATYPIPv4 || r.Atyp == ATYPDomain {
-		p = newReplyTCP(rep, ATYPIPv4, []byte{0x00, 0x00, 0x00, 0x00}, []byte{0x00, 0x00})
+		p = NewReplyTCP(rep, ATYPIPv4, []byte{0x00, 0x00, 0x00, 0x00}, []byte{0x00, 0x00})
 	} else {
-		p = newReplyTCP(rep, ATYPIPv6, []byte(net.IPv6zero), []byte{0x00, 0x00})
+		p = NewReplyTCP(rep, ATYPIPv6, []byte(net.IPv6zero), []byte{0x00, 0x00})
 	}
-	if _, err :=p.WriteTo(w); err != nil {
+	if _, err := p.WriteTo(w); err != nil {
 		return err
 	}
 	return nil
 }
+
 func (r *RequestTCP) Address() string {
 	var s string
 	if r.Atyp == ATYPDomain {
@@ -84,65 +91,72 @@ func (r *RequestTCP) Address() string {
 	p := strconv.Itoa(int(binary.BigEndian.Uint16(r.DstPort)))
 	return net.JoinHostPort(s, p)
 }
+
 func (r *RequestTCP) RemoteConnect(dial *Dialer, w io.Writer) (rc net.Conn, err error) {
-	
+	// 拨号用户发来的ip:port
 	if dial.Dial != nil {
 		rc, err = dial.Dial("tcp", r.Address())
-	}else if dial.DialContext != nil {
+	} else if dial.DialContext != nil {
 		rc, err = dial.DialContext(context.Background(), "tcp", r.Address())
-	}else{
+	} else {
 		rc, err = net.Dial("tcp", r.Address())
 	}
 	if err != nil {
-		if e := r.replyError(RepHostUnreachable, w); e != nil {
+		// 回复主机无法访问
+		if e := r.ReplyError(RepHostUnreachable, w); e != nil {
 			return nil, e
 		}
 		return nil, err
 	}
-	
-	a, addr, port, err := parseAddress(rc.LocalAddr().String())
+
+	// 回复拨号发起的本地地址
+	a, addr, port, err := ParseAddress(rc.LocalAddr().String())
 	if err != nil {
-		if e := r.replyError(RepHostUnreachable, w); e != nil {
+		// 回复主机无法访问
+		if e := r.ReplyError(RepHostUnreachable, w); e != nil {
 			return nil, e
 		}
 		return nil, err
 	}
-	p := newReplyTCP(RepSuccess, a, addr, port)
-	if _, err := p.WriteTo(w); err != nil {
+	if _, err := NewReplyTCP(RepSuccess, a, addr, port).WriteTo(w); err != nil {
 		return nil, err
 	}
 
 	return rc, nil
 }
-func (r *RequestTCP) UDP(clientTCPConn net.Conn, proxyAddr *net.UDPAddr) (clientUDPAddr *net.UDPAddr, err error) {
-	if bytes.Compare(r.DstPort, []byte{0x00, 0x00}) == 0 {
+
+func (r *RequestTCP) UDP(cconn net.Conn, proxyAddr *net.UDPAddr) (caddr *net.UDPAddr, err error) {
+	if bytes.Equal(r.DstPort, []byte{0x00, 0x00}) {
 		// 如果请求的主机/端口都是零，那么中继应该只使用发送请求的主机/端口。
 		// https://stackoverflow.com/questions/62283351/how-to-use-socks-5-proxy-with-tidudpclient-properly
-		clientUDPAddr, err = net.ResolveUDPAddr("udp", clientTCPConn.RemoteAddr().String())
+		caddr, err = net.ResolveUDPAddr("udp", cconn.RemoteAddr().String())
 	} else {
-		clientUDPAddr, err = net.ResolveUDPAddr("udp", r.Address())
+		caddr, err = net.ResolveUDPAddr("udp", r.Address())
 	}
 	if err != nil {
-		if e := r.replyError(RepHostUnreachable, clientTCPConn); e != nil {
-			return nil, e
-		}
-		return nil, err
-	}
-	
-	a, addr, port, err := parseAddress(proxyAddr.String())
-	if err != nil {
-		if e := r.replyError(RepHostUnreachable, clientTCPConn); e != nil {
+		// 回复主机无法访问
+		if e := r.ReplyError(RepHostUnreachable, cconn); e != nil {
 			return nil, e
 		}
 		return nil, err
 	}
 
-	p := newReplyTCP(RepSuccess, a, addr, port)
-	if _, err := p.WriteTo(clientTCPConn); err != nil {
+	// 回复 cconn.LocalAddr 的连接
+	a, addr, port, err := ParseAddress(proxyAddr.String())
+	if err != nil {
+		// 回复主机无法访问
+		if e := r.ReplyError(RepHostUnreachable, cconn); e != nil {
+			return nil, e
+		}
 		return nil, err
 	}
-	return clientUDPAddr, nil
+	p := NewReplyTCP(RepSuccess, a, addr, port)
+	if _, err := p.WriteTo(cconn); err != nil {
+		return nil, err
+	}
+	return caddr, nil
 }
+
 func (r *RequestTCP) WriteTo(w io.Writer) (int64, error) {
 	b := []byte{r.Ver, r.Cmd, r.Rsv, r.Atyp}
 	b = append(b, r.DstAddr...)
@@ -165,6 +179,7 @@ type ReplyTCP struct {
 	// UDP socks server's port which used to connect to dst addr
 	BndPort []byte // 2 bytes
 }
+
 func (r *ReplyTCP) WriteTo(w io.Writer) (int64, error) {
 	b := []byte{r.Ver, r.Rep, r.Rsv, r.Atyp}
 	b = append(b, r.BndAddr...)
@@ -172,6 +187,7 @@ func (r *ReplyTCP) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write(b)
 	return int64(n), err
 }
+
 func (r *ReplyTCP) Address() string {
 	var s string
 	if r.Atyp == ATYPDomain {
@@ -183,7 +199,6 @@ func (r *ReplyTCP) Address() string {
 	return net.JoinHostPort(s, p)
 }
 
-
 // 数据报文是UDP包
 type DatagramUDP struct {
 	Rsv     []byte // 0x00 0x00
@@ -193,6 +208,7 @@ type DatagramUDP struct {
 	DstPort []byte // 2 bytes
 	Data    []byte
 }
+
 // Bytes return []byte
 func (d *DatagramUDP) Bytes() []byte {
 	b := make([]byte, 0)
@@ -204,6 +220,7 @@ func (d *DatagramUDP) Bytes() []byte {
 	b = append(b, d.Data...)
 	return b
 }
+
 func (d *DatagramUDP) Address() string {
 	var s string
 	if d.Atyp == ATYPDomain {
