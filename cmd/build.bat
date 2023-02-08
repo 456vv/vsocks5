@@ -4,6 +4,8 @@ set GOSUMDB=sum.golang.org
 
 go mod tidy
 
+set CGO_ENABLED=0
+
 set GOOS=windows
 set GOARCH=amd64
 go build -o ../bin/vsocks5-win-amd64.exe -ldflags="-s -w"

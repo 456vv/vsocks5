@@ -61,6 +61,7 @@ func (T *Server) ServerTCP() error {
 		return err
 	}
 	defer T.listenTCP.Close()
+	T.Addr = T.listenTCP.Addr().String()
 
 	var (
 		tempDelay time.Duration
